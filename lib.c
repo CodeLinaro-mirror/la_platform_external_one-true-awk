@@ -35,6 +35,7 @@ THIS SOFTWARE.
 
 char	EMPTY[] = { '\0' };
 FILE	*infile	= NULL;
+bool	innew;		/* true = infile has not been read by readrec */
 char	*file	= EMPTY;
 char	*record;
 int	recsize	= RECSIZE;
@@ -55,8 +56,8 @@ int	lastfld	= 0;	/* last used field */
 int	argno	= 1;	/* current input argument number */
 extern	Awkfloat *ARGC;
 
-static Cell dollar0 = { OCELL, CFLD, NULL, EMPTY, 0.0, REC|STR|DONTFREE };
-static Cell dollar1 = { OCELL, CFLD, NULL, EMPTY, 0.0, FLD|STR|DONTFREE };
+static Cell dollar0 = { OCELL, CFLD, NULL, EMPTY, 0.0, REC|STR|DONTFREE, NULL, NULL };
+static Cell dollar1 = { OCELL, CFLD, NULL, EMPTY, 0.0, FLD|STR|DONTFREE, NULL, NULL };
 
 void recinit(unsigned int n)
 {
@@ -106,6 +107,7 @@ void initgetrec(void)
 		argno++;
 	}
 	infile = stdin;		/* no filenames, so use stdin */
+	innew = true;
 }
 
 /*
@@ -145,8 +147,8 @@ int getrec(char **pbuf, int *pbufsize, bool isrecord)	/* get next input record *
 		firsttime = false;
 		initgetrec();
 	}
-	   dprintf( ("RS=<%s>, FS=<%s>, ARGC=%g, FILENAME=%s\n",
-		*RS, *FS, *ARGC, *FILENAME) );
+	DPRINTF("RS=<%s>, FS=<%s>, ARGC=%g, FILENAME=%s\n",
+		*RS, *FS, *ARGC, *FILENAME);
 	if (isrecord) {
 		donefld = false;
 		donerec = true;
@@ -155,7 +157,7 @@ int getrec(char **pbuf, int *pbufsize, bool isrecord)	/* get next input record *
 	saveb0 = buf[0];
 	buf[0] = 0;
 	while (argno < *ARGC || infile == stdin) {
-		   dprintf( ("argno=%d, file=|%s|\n", argno, file) );
+		DPRINTF("argno=%d, file=|%s|\n", argno, file);
 		if (infile == NULL) {	/* have to open a new file */
 			file = getargv(argno);
 			if (file == NULL || *file == '\0') {	/* deleted or zapped */
@@ -168,14 +170,16 @@ int getrec(char **pbuf, int *pbufsize, bool isrecord)	/* get next input record *
 				continue;
 			}
 			*FILENAME = file;
-			   dprintf( ("opening file %s\n", file) );
+			DPRINTF("opening file %s\n", file);
 			if (*file == '-' && *(file+1) == '\0')
 				infile = stdin;
 			else if ((infile = fopen(file, "r")) == NULL)
 				FATAL("can't open file %s", file);
 			setfval(fnrloc, 0.0);
 		}
-		c = readrec(&buf, &bufsize, infile);
+		c = readrec(&buf, &bufsize, infile, innew);
+		if (innew)
+			innew = false;
 		if (c != 0 || buf[0] != '\0') {	/* normal record */
 			if (isrecord) {
 				if (freeable(fldtab[0]))
@@ -213,7 +217,7 @@ void nextfile(void)
 	argno++;
 }
 
-int readrec(char **pbuf, int *pbufsize, FILE *inf)	/* read one record into buf */
+int readrec(char **pbuf, int *pbufsize, FILE *inf, bool newflag)	/* read one record into buf */
 {
 	int sep, c, isrec;
 	char *rr, *buf = *pbuf;
@@ -224,7 +228,14 @@ int readrec(char **pbuf, int *pbufsize, FILE *inf)	/* read one record into buf *
 		bool found;
 
 		fa *pfa = makedfa(rs, 1);
-		found = fnematch(pfa, inf, &buf, &bufsize, recsize);
+		if (newflag)
+			found = fnematch(pfa, inf, &buf, &bufsize, recsize);
+		else {
+			int tempstat = pfa->initstat;
+			pfa->initstat = 2;
+			found = fnematch(pfa, inf, &buf, &bufsize, recsize);
+			pfa->initstat = tempstat;
+		}
 		if (found)
 			setptr(patbeg, '\0');
 	} else {
@@ -260,7 +271,7 @@ int readrec(char **pbuf, int *pbufsize, FILE *inf)	/* read one record into buf *
 	*pbuf = buf;
 	*pbufsize = bufsize;
 	isrec = *buf || !feof(inf);
-	   dprintf( ("readrec saw <%s>, returns %d\n", buf, isrec) );
+	DPRINTF("readrec saw <%s>, returns %d\n", buf, isrec);
 	return isrec;
 }
 
@@ -275,7 +286,7 @@ char *getargv(int n)	/* get ARGV[n] */
 		return NULL;
 	x = setsymtab(temp, "", 0.0, STR, ARGVtab);
 	s = getsval(x);
-	   dprintf( ("getargv(%d) returns |%s|\n", n, s) );
+	DPRINTF("getargv(%d) returns |%s|\n", n, s);
 	return s;
 }
 
@@ -294,7 +305,7 @@ void setclvar(char *s)	/* set var=value from s */
 		q->fval = atof(q->sval);
 		q->tval |= NUM;
 	}
-	   dprintf( ("command line set %s to |%s|\n", s, p) );
+	DPRINTF("command line set %s to |%s|\n", s, p);
 }
 
 
@@ -321,6 +332,8 @@ void fldbld(void)	/* create fields from current record */
 	}
 	fr = fields;
 	i = 0;	/* number of fields accumulated here */
+	if (inputFS == NULL)	/* make sure we have a copy of FS */
+		savefs();
 	if (strlen(inputFS) > 1) {	/* it's a regular expression */
 		i = refldbld(r, inputFS);
 	} else if ((sep = *inputFS) == ' ') {	/* default whitespace */
@@ -461,7 +474,7 @@ void growfldtab(int n)	/* make new fields up to at least $n */
 	if (n > nf)
 		nf = n;
 	s = (nf+1) * (sizeof (struct Cell *));  /* freebsd: how much do we need? */
-	if (s / sizeof(struct Cell *) - 1 == nf) /* didn't overflow */
+	if (s / sizeof(struct Cell *) - 1 == (size_t)nf) /* didn't overflow */
 		fldtab = realloc(fldtab, s);
 	else					/* overflow sizeof int */
 		xfree(fldtab);	/* make it null */
@@ -491,7 +504,7 @@ int refldbld(const char *rec, const char *fs)	/* build fields from reg expr in F
 	if (*rec == '\0')
 		return 0;
 	pfa = makedfa(fs, 1);
-	   dprintf( ("into refldbld, rec = <%s>, pat = <%s>\n", rec, fs) );
+	DPRINTF("into refldbld, rec = <%s>, pat = <%s>\n", rec, fs);
 	tempstat = pfa->initstat;
 	for (i = 1; ; i++) {
 		if (i > nfields)
@@ -500,16 +513,16 @@ int refldbld(const char *rec, const char *fs)	/* build fields from reg expr in F
 			xfree(fldtab[i]->sval);
 		fldtab[i]->tval = FLD | STR | DONTFREE;
 		fldtab[i]->sval = fr;
-		   dprintf( ("refldbld: i=%d\n", i) );
+		DPRINTF("refldbld: i=%d\n", i);
 		if (nematch(pfa, rec)) {
 			pfa->initstat = 2;	/* horrible coupling to b.c */
-			   dprintf( ("match %s (%d chars)\n", patbeg, patlen) );
+			DPRINTF("match %s (%d chars)\n", patbeg, patlen);
 			strncpy(fr, rec, patbeg-rec);
 			fr += patbeg - rec + 1;
 			*(fr-1) = '\0';
 			rec = patbeg + patlen;
 		} else {
-			   dprintf( ("no match %s\n", rec) );
+			DPRINTF("no match %s\n", rec);
 			strcpy(fr, rec);
 			pfa->initstat = tempstat;
 			break;
@@ -543,15 +556,15 @@ void recbld(void)	/* create $0 from $1..$NF if necessary */
 	if (!adjbuf(&record, &recsize, 2+r-record, recsize, &r, "recbld 3"))
 		FATAL("built giant record `%.30s...'", record);
 	*r = '\0';
-	   dprintf( ("in recbld inputFS=%s, fldtab[0]=%p\n", inputFS, (void*)fldtab[0]) );
+	DPRINTF("in recbld inputFS=%s, fldtab[0]=%p\n", inputFS, (void*)fldtab[0]);
 
 	if (freeable(fldtab[0]))
 		xfree(fldtab[0]->sval);
 	fldtab[0]->tval = REC | STR | DONTFREE;
 	fldtab[0]->sval = record;
 
-	   dprintf( ("in recbld inputFS=%s, fldtab[0]=%p\n", inputFS, (void*)fldtab[0]) );
-	   dprintf( ("recbld = |%s|\n", record) );
+	DPRINTF("in recbld inputFS=%s, fldtab[0]=%p\n", inputFS, (void*)fldtab[0]);
+	DPRINTF("recbld = |%s|\n", record);
 	donerec = true;
 }
 
@@ -582,11 +595,6 @@ void SYNTAX(const char *fmt, ...)
 	fprintf(stderr, "\n");
 	errorflag = 2;
 	eprint();
-}
-
-void fpecatch(int n)
-{
-	FATAL("floating point exception %d", n);
 }
 
 extern int bracecnt, brackcnt, parencnt;
@@ -750,6 +758,9 @@ int isclvar(const char *s)	/* is s of form var=something ? */
 /* strtod is supposed to be a proper test of what's a valid number */
 /* appears to be broken in gcc on linux: thinks 0x123 is a valid FP number */
 /* wrong: violates 4.10.1.4 of ansi C standard */
+/* well, not quite. As of C99, hex floating point is allowed. so this is
+ * a bit of a mess.
+ */
 
 #include <math.h>
 int is_number(const char *s)
@@ -760,7 +771,8 @@ int is_number(const char *s)
 	r = strtod(s, &ep);
 	if (ep == s || r == HUGE_VAL || errno == ERANGE)
 		return 0;
-	while (*ep == ' ' || *ep == '\t' || *ep == '\n')
+	/* allow \r as well. windows files aren't going to go away. */
+	while (*ep == ' ' || *ep == '\t' || *ep == '\n' || *ep == '\r')
 		ep++;
 	if (*ep == '\0')
 		return 1;
