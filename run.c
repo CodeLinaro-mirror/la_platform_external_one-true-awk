@@ -38,7 +38,7 @@ THIS SOFTWARE.
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "awk.h"
-#include "ytab.h"
+#include "awkgram.tab.h"
 
 static void stdinit(void);
 static void flush_all(void);
@@ -118,8 +118,8 @@ int adjbuf(char **pbuf, int *psiz, int minlen, int quantum, char **pbptr,
 		/* round up to next multiple of quantum */
 		if (rminlen)
 			minlen += quantum - rminlen;
-		tbuf = realloc(*pbuf, minlen);
-		DPRINTF("adjbuf %s: %d %d (pbuf=%p, tbuf=%p)\n", whatrtn, *psiz, minlen, *pbuf, tbuf);
+		tbuf = (char *) realloc(*pbuf, minlen);
+		DPRINTF("adjbuf %s: %d %d (pbuf=%p, tbuf=%p)\n", whatrtn, *psiz, minlen, (void*)*pbuf, (void*)tbuf);
 		if (tbuf == NULL) {
 			if (whatrtn)
 				FATAL("out of memory in %s", whatrtn);
@@ -240,7 +240,7 @@ Cell *call(Node **a, int n)	/* function call.  very kludgy and fragile */
 	if (!isfcn(fcn))
 		FATAL("calling undefined function %s", s);
 	if (frame == NULL) {
-		frp = frame = calloc(nframe += 100, sizeof(*frame));
+		frp = frame = (struct Frame *) calloc(nframe += 100, sizeof(*frame));
 		if (frame == NULL)
 			FATAL("out of space for stack frames calling %s", s);
 	}
@@ -274,7 +274,7 @@ Cell *call(Node **a, int n)	/* function call.  very kludgy and fragile */
 	frp++;	/* now ok to up frame */
 	if (frp >= frame + nframe) {
 		int dfp = frp - frame;	/* old index */
-		frame = realloc(frame, (nframe += 100) * sizeof(*frame));
+		frame = (struct Frame *) realloc(frame, (nframe += 100) * sizeof(*frame));
 		if (frame == NULL)
 			FATAL("out of space for stack frames in %s", s);
 		frp = frame + dfp;
@@ -408,7 +408,7 @@ Cell *awkgetline(Node **a, int n)	/* get next line from specific input */
 	int mode;
 	bool newflag;
 
-	if ((buf = malloc(bufsize)) == NULL)
+	if ((buf = (char *) malloc(bufsize)) == NULL)
 		FATAL("out of memory in getline");
 
 	fflush(stdout);	/* in case someone is waiting for a prompt */
@@ -474,7 +474,7 @@ makearraystring(Node *p, const char *func)
 	int bufsz = recsize;
 	size_t blen;
 
-	if ((buf = malloc(bufsz)) == NULL) {
+	if ((buf = (char *) malloc(bufsz)) == NULL) {
 		FATAL("%s: out of memory", func);
 	}
 
@@ -701,7 +701,7 @@ Cell *gettemp(void)	/* get a tempcell */
 	Cell *x;
 
 	if (!tmps) {
-		tmps = calloc(100, sizeof(*tmps));
+		tmps = (Cell *) calloc(100, sizeof(*tmps));
 		if (!tmps)
 			FATAL("out of space for temporaries");
 		for (i = 1; i < 100; i++)
@@ -839,7 +839,7 @@ int format(char **pbuf, int *pbufsize, const char *s, Node *a)	/* printf-like co
 
 	os = s;
 	p = buf;
-	if ((fmt = malloc(fmtsz)) == NULL)
+	if ((fmt = (char *) malloc(fmtsz)) == NULL)
 		FATAL("out of memory in format()");
 	while (*s) {
 		adjbuf(&buf, &bufsize, MAXNUMSIZE+1+p-buf, recsize, &p, "format1");
@@ -982,7 +982,7 @@ Cell *awksprintf(Node **a, int n)		/* sprintf(a[0]) */
 	char *buf;
 	int bufsz=3*recsize;
 
-	if ((buf = malloc(bufsz)) == NULL)
+	if ((buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of memory in awksprintf");
 	y = a[0]->nnext;
 	x = execute(a[0]);
@@ -1005,7 +1005,7 @@ Cell *awkprintf(Node **a, int n)		/* printf */
 	int len;
 	int bufsz=3*recsize;
 
-	if ((buf = malloc(bufsz)) == NULL)
+	if ((buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of memory in awkprintf");
 	y = a[0]->nnext;
 	x = execute(a[0]);
@@ -1521,7 +1521,6 @@ static char *nawk_convert(const char *s, int (*fun_c)(int),
 	char *pbuf     = NULL;
 	const char *ps = NULL;
 	size_t n       = 0;
-	mbstate_t mbs, mbs2;
 	wchar_t wc;
 	size_t sz = MB_CUR_MAX;
 
@@ -1536,17 +1535,24 @@ static char *nawk_convert(const char *s, int (*fun_c)(int),
 		/* upper/lower character may be shorter/longer */
 		buf = tostringN(s, strlen(s) * sz + 1);
 
-		memset(&mbs,  0, sizeof(mbs));
-		memset(&mbs2, 0, sizeof(mbs2));
+		(void) mbtowc(NULL, NULL, 0);	/* reset internal state */
+		/*
+		 * Reset internal state here too.
+		 * Assign result to avoid a compiler warning. (Casting to void
+		 * doesn't work.)
+		 * Increment said variable to avoid a different warning.
+		 */
+		int unused = wctomb(NULL, L'\0');
+		unused++;
 
 		ps   = s;
 		pbuf = buf;
-		while (n = mbrtowc(&wc, ps, sz, &mbs),
+		while (n = mbtowc(&wc, ps, sz),
 		       n > 0 && n != (size_t)-1 && n != (size_t)-2)
 		{
 			ps += n;
 
-			n = wcrtomb(pbuf, fun_wc(wc), &mbs2);
+			n = wctomb(pbuf, fun_wc(wc));
 			if (n == (size_t)-1)
 				FATAL("illegal wide character %s", s);
 
@@ -1561,6 +1567,24 @@ static char *nawk_convert(const char *s, int (*fun_c)(int),
 		return buf;
 	}
 }
+
+#ifdef __DJGPP__
+static wint_t towupper(wint_t wc)
+{
+	if (wc >= 0 && wc < 256)
+		return toupper(wc & 0xFF);
+
+	return wc;
+}
+
+static wint_t towlower(wint_t wc)
+{
+	if (wc >= 0 && wc < 256)
+		return tolower(wc & 0xFF);
+
+	return wc;
+}
+#endif
 
 static char *nawk_toupper(const char *s)
 {
@@ -1748,7 +1772,7 @@ size_t nfiles;
 static void stdinit(void)	/* in case stdin, etc., are not constants */
 {
 	nfiles = FOPEN_MAX;
-	files = calloc(nfiles, sizeof(*files));
+	files = (struct files *) calloc(nfiles, sizeof(*files));
 	if (files == NULL)
 		FATAL("can't allocate file memory for %zu files", nfiles);
         files[0].fp = stdin;
@@ -1788,7 +1812,7 @@ FILE *openfile(int a, const char *us, bool *pnewflag)
 	if (i >= nfiles) {
 		struct files *nf;
 		size_t nnf = nfiles + FOPEN_MAX;
-		nf = realloc(files, nnf * sizeof(*nf));
+		nf = (struct files *) realloc(files, nnf * sizeof(*nf));
 		if (nf == NULL)
 			FATAL("cannot grow files for %s and %zu files", s, nnf);
 		memset(&nf[nfiles], 0, FOPEN_MAX * sizeof(*nf));
@@ -1837,7 +1861,7 @@ const char *filename(FILE *fp)
  	Cell *x;
 	size_t i;
 	bool stat;
- 
+
  	x = execute(a[0]);
  	getsval(x);
 	stat = true;
@@ -1846,7 +1870,10 @@ const char *filename(FILE *fp)
 			continue;
 		if (ferror(files[i].fp))
 			FATAL("i/o error occurred on %s", files[i].fname);
-		if (files[i].mode == '|' || files[i].mode == LE)
+		if (files[i].fp == stdin || files[i].fp == stdout ||
+		    files[i].fp == stderr)
+			stat = freopen("/dev/null", "r+", files[i].fp) == NULL;
+		else if (files[i].mode == '|' || files[i].mode == LE)
 			stat = pclose(files[i].fp) == -1;
 		else
 			stat = fclose(files[i].fp) == EOF;
@@ -1856,6 +1883,7 @@ const char *filename(FILE *fp)
 			xfree(files[i].fname);
 		files[i].fname = NULL;	/* watch out for ref thru this */
 		files[i].fp = NULL;
+		break;
  	}
  	tempfree(x);
  	x = gettemp();
@@ -1873,8 +1901,12 @@ void closeall(void)
 			continue;
 		if (ferror(files[i].fp))
 			FATAL( "i/o error occurred on %s", files[i].fname );
+		if (files[i].fp == stdin)
+			continue;
 		if (files[i].mode == '|' || files[i].mode == LE)
 			stat = pclose(files[i].fp) == -1;
+		else if (files[i].fp == stdout || files[i].fp == stderr)
+			stat = fflush(files[i].fp) == EOF;
 		else
 			stat = fclose(files[i].fp) == EOF;
 		if (stat)
@@ -1901,7 +1933,7 @@ Cell *sub(Node **a, int nnn)	/* substitute command */
 	fa *pfa;
 	int bufsz = recsize;
 
-	if ((buf = malloc(bufsz)) == NULL)
+	if ((buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of memory in sub");
 	x = execute(a[3]);	/* target string */
 	t = getsval(x);
@@ -1963,7 +1995,7 @@ Cell *gsub(Node **a, int nnn)	/* global substitute */
 	int mflag, tempstat, num;
 	int bufsz = recsize;
 
-	if ((buf = malloc(bufsz)) == NULL)
+	if ((buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of memory in gsub");
 	mflag = 0;	/* if mflag == 0, can replace empty string */
 	num = 0;

@@ -29,7 +29,6 @@ THIS SOFTWARE.
 #include <string.h>
 #include <stdlib.h>
 #include "awk.h"
-#include "ytab.h"
 
 #define	FULLTAB	2	/* rehash when table gets this x full */
 #define	GROWTAB 4	/* grow table by this factor */
@@ -167,8 +166,8 @@ Array *makesymtab(int n)	/* make a new symbol table */
 	Array *ap;
 	Cell **tp;
 
-	ap = malloc(sizeof(*ap));
-	tp = calloc(n, sizeof(*tp));
+	ap = (Array *) malloc(sizeof(*ap));
+	tp = (Cell **) calloc(n, sizeof(*tp));
 	if (ap == NULL || tp == NULL)
 		FATAL("out of space in makesymtab");
 	ap->nelem = 0;
@@ -238,7 +237,7 @@ Cell *setsymtab(const char *n, const char *s, Awkfloat f, unsigned t, Array *tp)
 			(void*)p, NN(p->nval), NN(p->sval), p->fval, p->tval);
 		return(p);
 	}
-	p = malloc(sizeof(*p));
+	p = (Cell *) malloc(sizeof(*p));
 	if (p == NULL)
 		FATAL("out of space for symbol table at %s", n);
 	p->nval = tostring(n);
@@ -273,7 +272,7 @@ void rehash(Array *tp)	/* rehash items in small table into big one */
 	Cell *cp, *op, **np;
 
 	nsz = GROWTAB * tp->size;
-	np = calloc(nsz, sizeof(*np));
+	np = (Cell **) calloc(nsz, sizeof(*np));
 	if (np == NULL)		/* can't do it, but can keep running. */
 		return;		/* someone else will run out later. */
 	for (i = 0; i < tp->size; i++) {
@@ -362,7 +361,7 @@ char *setsval(Cell *vp, const char *s)	/* set string val of a Cell */
 		fldno = atoi(vp->nval);
 		if (fldno > *NF)
 			newfld(fldno);
-		DPRINTF("setting field %d to %s (%p)\n", fldno, s, s);
+		DPRINTF("setting field %d to %s (%p)\n", fldno, s, (const void*)s);
 	} else if (isrec(vp)) {
 		donefld = false;	/* mark $1... invalid */
 		donerec = true;
@@ -379,7 +378,7 @@ char *setsval(Cell *vp, const char *s)	/* set string val of a Cell */
 	vp->fmt = NULL;
 	setfree(vp);
 	DPRINTF("setsval %p: %s = \"%s (%p) \", t=%o r,f=%d,%d\n",
-		(void*)vp, NN(vp->nval), t, t, vp->tval, donerec, donefld);
+		(void*)vp, NN(vp->nval), t, (void*)t, vp->tval, donerec, donefld);
 	vp->sval = t;
 	if (&vp->fval == NF) {
 		donerec = false;	/* mark $0 invalid */
@@ -493,7 +492,7 @@ static char *get_str_val(Cell *vp, char **fmt)        /* get string val of a Cel
 	}
 done:
 	DPRINTF("getsval %p: %s = \"%s (%p)\", t=%o\n",
-		(void*)vp, NN(vp->nval), vp->sval, vp->sval, vp->tval);
+		(void*)vp, NN(vp->nval), vp->sval, (void*)vp->sval, vp->tval);
 	return(vp->sval);
 }
 
@@ -520,7 +519,7 @@ char *tostringN(const char *s, size_t n)	/* make a copy of string s */
 {
 	char *p;
 
-	p = malloc(n);
+	p = (char *) malloc(n);
 	if (p == NULL)
 		FATAL("out of space in tostring on %s", s);
 	strcpy(p, s);
@@ -534,13 +533,13 @@ Cell *catstr(Cell *a, Cell *b) /* concatenate a and b */
 	char *sa = getsval(a);
 	char *sb = getsval(b);
 	size_t l = strlen(sa) + strlen(sb) + 1;
-	p = malloc(l);
+	p = (char *) malloc(l);
 	if (p == NULL)
 		FATAL("out of space concatenating %s and %s", sa, sb);
 	snprintf(p, l, "%s%s", sa, sb);
 
 	l++;	// add room for ' '
-	char *newbuf = malloc(l);
+	char *newbuf = (char *) malloc(l);
 	if (newbuf == NULL)
 		FATAL("out of space concatenating %s and %s", sa, sb);
 	// See string() in lex.c; a string "xx" is stored in the symbol
@@ -559,7 +558,7 @@ char *qstring(const char *is, int delim)	/* collect string up to next delim */
 	const uschar *s = (const uschar *) is;
 	uschar *buf, *bp;
 
-	if ((buf = malloc(strlen(is)+3)) == NULL)
+	if ((buf = (uschar *) malloc(strlen(is)+3)) == NULL)
 		FATAL( "out of space in qstring(%s)", s);
 	for (bp = buf; (c = *s) != delim; s++) {
 		if (c == '\n')

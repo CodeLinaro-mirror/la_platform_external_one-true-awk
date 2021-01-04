@@ -27,7 +27,7 @@ THIS SOFTWARE.
 #include <string.h>
 #include <ctype.h>
 #include "awk.h"
-#include "ytab.h"
+#include "awkgram.tab.h"
 
 extern YYSTYPE	yylval;
 extern bool	infunc;
@@ -148,7 +148,7 @@ static int gettok(char **pbuf, int *psz)	/* get next input token */
 		strtod(buf, &rem);	/* parse the number */
 		if (rem == buf) {	/* it wasn't a valid number at all */
 			buf[1] = 0;	/* return one character as token */
-			retc = buf[0];	/* character is its own type */
+			retc = (uschar)buf[0];	/* character is its own type */
 			unputstr(rem+1); /* put rest back for later */
 		} else {	/* some prefix was a number */
 			unputstr(rem);	/* put rest back for later */
@@ -173,7 +173,7 @@ int yylex(void)
 	static char *buf = NULL;
 	static int bufsize = 5; /* BUG: setting this small causes core dump! */
 
-	if (buf == NULL && (buf = malloc(bufsize)) == NULL)
+	if (buf == NULL && (buf = (char *) malloc(bufsize)) == NULL)
 		FATAL( "out of space in yylex" );
 	if (sc) {
 		sc = false;
@@ -370,7 +370,7 @@ int string(void)
 	static char *buf = NULL;
 	static int bufsz = 500;
 
-	if (buf == NULL && (buf = malloc(bufsz)) == NULL)
+	if (buf == NULL && (buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of space for strings");
 	for (bp = buf; (c = input()) != '"'; ) {
 		if (!adjbuf(&buf, &bufsz, bp-buf+2, 500, &bp, "string"))
@@ -519,7 +519,7 @@ int regexpr(void)
 	static int bufsz = 500;
 	char *bp;
 
-	if (buf == NULL && (buf = malloc(bufsz)) == NULL)
+	if (buf == NULL && (buf = (char *) malloc(bufsz)) == NULL)
 		FATAL("out of space for rex expr");
 	bp = buf;
 	for ( ; (c = input()) != '/' && c != 0; ) {
