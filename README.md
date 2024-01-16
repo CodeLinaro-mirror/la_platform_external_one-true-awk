@@ -21,14 +21,12 @@ Aribtrary characters may be included with `\u` followed by 1 to 8 hexadecimal di
 ### Regular expressions ###
 
 Regular expressions may include UTF-8 code points, including `\u`.
-Character classes are likely to be limited to about 256 characters
-when expanded.
 
 ### CSV ###
 
 The option `--csv` turns on CSV processing of input:
 fields are separated by commas, fields may be quoted with
-double-quote (`"`) characters, fields may contain embedded newlines.
+double-quote (`"`) characters, quoted fields may contain embedded newlines.
 In CSV mode, `FS` is ignored.
 
 If no explicit separator argument is provided,
@@ -145,4 +143,4 @@ is not at the top of our priority list.
 
 #### Last Updated
 
-Sun Sep  3 09:26:43 EDT 2023
+Mon 16 Oct 2023 11:23:08 IDT

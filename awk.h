@@ -64,6 +64,8 @@ extern bool	safe;		/* false => unsafe, true => safe */
 #define	RECSIZE	(8 * 1024)	/* sets limit on records, fields, etc., etc. */
 extern int	recsize;	/* size of current record, orig RECSIZE */
 
+extern size_t	awk_mb_cur_max;	/* max size of a multi-byte character */
+
 extern char	EMPTY[];	/* this avoid -Wwritable-strings issues */
 extern char	**FS;
 extern char	**RS;
@@ -244,14 +246,19 @@ typedef struct rrow {
 	int	*lfollow;
 } rrow;
 
-typedef struct gtt { /* gototab entry */
+typedef struct gtte { /* gototab entry */
 	unsigned int ch;
 	unsigned int state;
+} gtte;
+
+typedef struct gtt {	/* gototab */
+	size_t	allocated;
+	size_t	inuse;
+	gtte	*entries;
 } gtt;
 
 typedef struct fa {
-	gtt	**gototab;
-	int	gototab_len;
+	gtt	*gototab;
 	uschar	*out;
 	uschar	*restr;
 	int	**posns;
